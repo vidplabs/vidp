@@ -2,6 +2,7 @@ import AppKit
 
 final class SettingsSidebarView: NSView {
     var onDone: (() -> Void)?
+    var initialFocusView: NSView { hudSystemCheck }
 
     private var hudFontPopup: NSPopUpButton!
     private var hudSystemCheck: NSButton!
@@ -178,6 +179,23 @@ final class SettingsSidebarView: NSView {
             stack.topAnchor.constraint(equalTo: topAnchor),
             stack.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
+
+        hudFontPopup.setAccessibilityLabel("On-screen display font")
+        hudSystemCheck.setAccessibilityLabel("Use system font for on-screen display")
+        hudBoldCheck.setAccessibilityLabel("Bold on-screen display text")
+        hudItalicCheck.setAccessibilityLabel("Italic on-screen display text")
+        hudBorderInput.labelControls("On-screen display outline size")
+        progressColorWell.setAccessibilityLabel("Progress bar color")
+        progressSystemCheck.setAccessibilityLabel("Use automatic progress bar color")
+        subFontPopup.setAccessibilityLabel("Subtitle font")
+        subSystemCheck.setAccessibilityLabel("Use system font for subtitles")
+        subBoldCheck.setAccessibilityLabel("Bold subtitles")
+        subItalicCheck.setAccessibilityLabel("Italic subtitles")
+        subSizeInput.labelControls("Subtitle font size")
+        subColorWell.setAccessibilityLabel("Subtitle text color")
+        subBorderColorWell.setAccessibilityLabel("Subtitle outline color")
+        subBorderInput.labelControls("Subtitle outline size")
+        subShadowInput.labelControls("Subtitle shadow offset")
     }
 
     @available(*, unavailable)
@@ -470,6 +488,12 @@ private final class BoundedNumberInput: NSStackView, NSTextFieldDelegate {
         currentValue = clamped
         field.doubleValue = clamped
         stepper.doubleValue = clamped
+    }
+
+    func labelControls(_ label: String) {
+        field.setAccessibilityLabel(label)
+        field.setAccessibilityHelp("Allowed range: \(Int(range.lowerBound)) to \(Int(range.upperBound)).")
+        stepper.setAccessibilityLabel("Adjust \(label.lowercased())")
     }
 
     @objc private func fieldChanged() {

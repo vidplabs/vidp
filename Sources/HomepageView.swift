@@ -156,6 +156,7 @@ final class HomepageView: NSView {
         for section in Section.allCases {
             let button = NSButton(title: section.title, target: self, action: #selector(sectionTapped(_:)))
             button.tag = section.rawValue
+            button.setAccessibilityLabel(section.title)
             button.attributedTitle = NSAttributedString(
                 string: section.title,
                 attributes: [.foregroundColor: NSColor.clear])
@@ -167,6 +168,7 @@ final class HomepageView: NSView {
             button.heightAnchor.constraint(equalToConstant: 34).isActive = true
 
             let content = NavigationButtonContentView()
+            content.setAccessibilityHidden(true)
             content.translatesAutoresizingMaskIntoConstraints = false
             button.addSubview(content)
             NSLayoutConstraint.activate([

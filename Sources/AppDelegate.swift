@@ -133,6 +133,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Play
         hudOverlay = HUDOverlayView(frame: .zero)
         hudOverlay.translatesAutoresizingMaskIntoConstraints = false
         hudOverlay.playerView = playerView
+        playerView.onRevealControls = { [weak self] in self?.hudOverlay.revealControls() }
         hudOverlay.onSettingsToggle = { [weak self] in self?.toggleSettingsSidebar() }
         hudOverlay.onPiPToggle = { [weak self] in self?.togglePiP() }
         hudOverlay.onFullscreenToggle = { [weak self] in
@@ -271,7 +272,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Play
         mainMenu.addItem(viewMenuItem)
 
         let playbackMenuItem = NSMenuItem()
-        let playbackMenu = NSMenu(title: "Playback")
+        let playbackMenu = PlaybackMenu(title: "Playback")
+        playbackMenu.settingsOpen = { [weak self] in self?.isSettingsOpen ?? false }
         // Real key equivalents mirroring PlayerView.keyDown; they stay disabled
         // while a sheet/panel is open so they can't steal keystrokes (see
         // validateMenuItem).
@@ -445,7 +447,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Play
         }
         guard hudOverlay?.isFileLoaded == true else { return }
         isSettingsOpen.toggle()
-        settingsSplitItem.animator().isCollapsed = !isSettingsOpen
+        NSAnimationContext.runAnimationGroup { context in
+            if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { context.duration = 0 }
+            settingsSplitItem.animator().isCollapsed = !isSettingsOpen
+        } completionHandler: { [weak self] in
+            guard let self, self.isSettingsOpen,
+                  let sidebar = self.settingsSplitItem.viewController.view as? SettingsSidebarView
+            else { return }
+            self.window.makeFirstResponder(sidebar.initialFocusView)
+        }
         if isSettingsOpen {
             settingsMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
                 guard event.keyCode == 53, self?.isSettingsOpen == true else { return event }
@@ -461,6 +471,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Play
         guard isSettingsOpen else { return }
         isSettingsOpen = false
         settingsSplitItem.animator().isCollapsed = true
+        hudOverlay.revealControls()
+        window.makeFirstResponder(playerView)
         removeSettingsMonitor()
     }
 
@@ -619,10 +631,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Play
             // Disabled items don't match key equivalents, which also keeps
             // single-letter shortcuts from firing while a sheet owns focus.
             guard window?.attachedSheet == nil, NSApp.modalWindow == nil else { return false }
+            guard Self.settingsAllowPlaybackShortcut(menuItem, settingsOpen: isSettingsOpen) else {
+                return false
+            }
             return hudOverlay?.isFileLoaded ?? false
         default:
             return true
         }
+    }
+
+    /// AppKit checks menu equivalents before delivering keys to the focused control.
+    static func settingsAllowPlaybackShortcut(_ item: NSMenuItem, settingsOpen: Bool) -> Bool {
+        !settingsOpen || !item.keyEquivalentModifierMask.intersection([.command, .control, .option]).isEmpty
     }
 
     /// First reveal of the window: cold-start opens stay hidden until here, so
@@ -1285,6 +1305,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Play
 
     func playerDidToggleMute(_ muted: Bool) {
         hudOverlay.setMuted(muted)
+    }
+}
+
+/// Disabled menu items can still consume their equivalents. Yield before AppKit
+/// matches them so Settings receives Space, arrows, and single-letter input.
+final class PlaybackMenu: NSMenu {
+    var settingsOpen: () -> Bool = { false }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if settingsOpen(), event.modifierFlags.intersection([.command, .control, .option]).isEmpty {
+            return false
+        }
+        return super.performKeyEquivalent(with: event)
     }
 }
 

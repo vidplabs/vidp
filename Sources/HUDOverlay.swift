@@ -8,11 +8,37 @@ import CMPV
 final class ScrubSlider: NSSlider {
     var onBegin: (() -> Void)?
     var onEnd: (() -> Void)?
+    var onFocus: (() -> Void)?
+    var mediaDuration: Double = 0
+
+    override func becomeFirstResponder() -> Bool {
+        onFocus?()
+        return super.becomeFirstResponder()
+    }
+
+    override func accessibilityValueDescription() -> String? {
+        guard mediaDuration.isFinite, mediaDuration > 0 else { return "Unavailable" }
+        func time(_ seconds: Double) -> String {
+            let total = Int(max(0, seconds))
+            return "\(total / 3600) hours, \((total % 3600) / 60) minutes, \(total % 60) seconds"
+        }
+        return "\(time(doubleValue * mediaDuration)) of \(time(mediaDuration))"
+    }
 
     override func mouseDown(with event: NSEvent) {
         onBegin?()
         super.mouseDown(with: event)
         onEnd?()
+    }
+}
+
+/// Reveal controls before AppKit moves keyboard focus into them.
+final class PlayerControlButton: NSButton {
+    var onFocus: (() -> Void)?
+
+    override func becomeFirstResponder() -> Bool {
+        onFocus?()
+        return super.becomeFirstResponder()
     }
 }
 
@@ -32,6 +58,7 @@ final class ClickThroughStackView: NSStackView {
 final class HUDOverlayView: NSView {
     private var hideTimer: Timer?
     private var displayTimer: Timer?
+    private var voiceOverObservation: NSKeyValueObservation?
     private(set) var isPaused: Bool = false
     private(set) var isFileLoaded: Bool = false
     private let hideDelay: TimeInterval = 3.0
@@ -106,15 +133,16 @@ final class HUDOverlayView: NSView {
         super.init(frame: frameRect)
         translatesAutoresizingMaskIntoConstraints = false
         alphaValue = 0
+        isHidden = true
 
         rewindGlass = makeTransportButton(
-            symbol: "gobackward.10", pointSize: 28, diameter: 60,
+            symbol: "gobackward.10", label: "Rewind 10 seconds", pointSize: 28, diameter: 60,
             action: #selector(rewindTapped))
         playGlass = makeTransportButton(
-            symbol: "play.fill", pointSize: 42, diameter: 90,
+            symbol: "play.fill", label: "Play", pointSize: 42, diameter: 90,
             action: #selector(playTapped))
         forwardGlass = makeTransportButton(
-            symbol: "goforward.10", pointSize: 28, diameter: 60,
+            symbol: "goforward.10", label: "Forward 10 seconds", pointSize: 28, diameter: 60,
             action: #selector(forwardTapped))
 
         transportStack = NSStackView(views: [rewindGlass, playGlass, forwardGlass])
@@ -130,10 +158,10 @@ final class HUDOverlayView: NSView {
 
         // Top-left: back + support buttons
         let backGlass = makeTransportButton(
-            symbol: "chevron.left", pointSize: 15, diameter: Self.topControlDiameter,
+            symbol: "chevron.left", label: "Back to library", pointSize: 15, diameter: Self.topControlDiameter,
             action: #selector(backTapped))
         let supportGlass = makeTransportButton(
-            symbol: "heart", pointSize: 15, diameter: Self.topControlDiameter,
+            symbol: "heart", label: "Support Vidp — Buy Me a Coffee", pointSize: 15, diameter: Self.topControlDiameter,
             action: #selector(supportTapped))
         (supportGlass.contentView as? NSButton)?.toolTip = "Support Vidp — Buy Me a Coffee"
         let topLeftRow = NSStackView(views: [backGlass, supportGlass])
@@ -149,17 +177,21 @@ final class HUDOverlayView: NSView {
 
         // Top-right: mute + audio + subtitles + speed + pip
         muteGlass = makeTransportButton(
-            symbol: "speaker.wave.2", pointSize: 15, diameter: Self.topControlDiameter,
+            symbol: "speaker.wave.2", label: "Mute", pointSize: 15, diameter: Self.topControlDiameter,
             action: #selector(muteTapped))
         audioGlass = makeTransportButton(
-            symbol: "waveform", pointSize: 15, diameter: Self.topControlDiameter,
-            action: #selector(audioTapped))
+            symbol: "waveform", label: "Audio tracks", pointSize: 15, diameter: Self.topControlDiameter,
+            action: #selector(audioTapped(_:)))
         subsGlass = makeTransportButton(
-            symbol: "captions.bubble", pointSize: 15, diameter: Self.topControlDiameter,
-            action: #selector(subtitleTapped))
-        speedButton = NSButton(title: "1x", target: self, action: #selector(speedTapped))
+            symbol: "captions.bubble", label: "Subtitles", pointSize: 15, diameter: Self.topControlDiameter,
+            action: #selector(subtitleTapped(_:)))
+        let speedControl = PlayerControlButton(title: "1x", target: self, action: #selector(speedTapped))
+        speedControl.onFocus = { [weak self] in self?.revealControls() }
+        speedButton = speedControl
         speedButton.isBordered = false
-        speedButton.focusRingType = .none
+        speedButton.focusRingType = .exterior
+        speedButton.setAccessibilityLabel("Playback speed")
+        speedButton.setAccessibilityHelp("Activate to cycle through playback speeds.")
         speedButton.contentTintColor = .white
         speedButton.font = .monospacedDigitSystemFont(ofSize: 13, weight: .semibold)
         speedButton.alignment = .center
@@ -175,7 +207,7 @@ final class HUDOverlayView: NSView {
         ])
         speedButton.toolTip = "Playback speed"
         let pipGlass = makeTransportButton(
-            symbol: "pip.enter", pointSize: 15, diameter: Self.topControlDiameter,
+            symbol: "pip.enter", label: "Toggle Picture in Picture", pointSize: 15, diameter: Self.topControlDiameter,
             action: #selector(pipTapped))
         let topRow = NSStackView(views: [muteGlass, audioGlass, subsGlass, speedGlass, pipGlass])
         topRow.spacing = 12
@@ -291,10 +323,16 @@ final class HUDOverlayView: NSView {
             value: 0, minValue: 0, maxValue: 1,
             target: self, action: #selector(scrubChanged))
         progressBar.isContinuous = true
+        progressBar.setAccessibilityLabel("Playback position")
+        progressBar.setAccessibilityHelp("Use the arrow keys to seek.")
+        progressBar.isEnabled = false
+        elapsedLabel.setAccessibilityLabel("Elapsed time")
+        remainingLabel.setAccessibilityLabel("Remaining time")
         progressBar.trackFillColor = AppSettings.progressNSColor
         progressBar.translatesAutoresizingMaskIntoConstraints = false
         (progressBar as? ScrubSlider)?.onBegin = { [weak self] in self?.scrubBegan() }
         (progressBar as? ScrubSlider)?.onEnd = { [weak self] in self?.scrubEnded() }
+        (progressBar as? ScrubSlider)?.onFocus = { [weak self] in self?.revealControls() }
 
         let barRow = NSStackView(views: [elapsedLabel, progressBar, remainingLabel])
         barRow.spacing = 10
@@ -305,14 +343,14 @@ final class HUDOverlayView: NSView {
 
         // Bottom right: next + settings + fullscreen above progress bar
         nextGlass = makeTransportButton(
-            symbol: "chevron.right.2", pointSize: 15, diameter: 40,
+            symbol: "chevron.right.2", label: "Next video", pointSize: 15, diameter: 40,
             action: #selector(nextTapped))
         nextGlass.isHidden = true
         settingsGlass = makeTransportButton(
-            symbol: "gearshape", pointSize: 15, diameter: 40,
+            symbol: "gearshape", label: "Settings", pointSize: 15, diameter: 40,
             action: #selector(settingsTapped))
         let fullscreenGlass = makeTransportButton(
-            symbol: "arrow.up.left.and.arrow.down.right", pointSize: 15, diameter: 40,
+            symbol: "arrow.up.left.and.arrow.down.right", label: "Toggle full screen", pointSize: 15, diameter: 40,
             action: #selector(fullscreenTapped))
         let bottomRightRow = NSStackView(views: [nextGlass, settingsGlass, fullscreenGlass])
         bottomRightRow.spacing = 12
@@ -365,6 +403,7 @@ final class HUDOverlayView: NSView {
             titleAccentView, titleLabel, metaLabel,
         ]
         controlViews.forEach { $0.alphaValue = 1 }
+        setAccessibilityHidden(true)
 
         addTrackingArea(
             NSTrackingArea(
@@ -375,6 +414,9 @@ final class HUDOverlayView: NSView {
         NotificationCenter.default.addObserver(
             self, selector: #selector(settingsDidChange),
             name: .appSettingsDidChange, object: nil)
+        voiceOverObservation = NSWorkspace.shared.observe(\.isVoiceOverEnabled) { [weak self] _, _ in
+            DispatchQueue.main.async { self?.revealControls() }
+        }
     }
 
     override func layout() {
@@ -390,7 +432,7 @@ final class HUDOverlayView: NSView {
     // MARK: - Transport buttons
 
     private func makeTransportButton(
-        symbol: String, pointSize: CGFloat,
+        symbol: String, label: String, pointSize: CGFloat,
         diameter: CGFloat, action: Selector
     ) -> NSGlassEffectView {
         let config = NSImage.SymbolConfiguration(pointSize: pointSize, weight: .medium)
@@ -398,7 +440,11 @@ final class HUDOverlayView: NSView {
             NSImage(systemSymbolName: symbol, accessibilityDescription: nil)?
             .withSymbolConfiguration(config) ?? NSImage()
 
-        let button = NSButton(image: img, target: self, action: action)
+        let button = PlayerControlButton(image: img, target: self, action: action)
+        button.onFocus = { [weak self] in self?.revealControls() }
+        button.setAccessibilityLabel(label)
+        button.toolTip = label
+        button.focusRingType = .exterior
         button.isBordered = false
         button.contentTintColor = .white
         button.wantsLayer = true
@@ -466,7 +512,7 @@ final class HUDOverlayView: NSView {
             if (track["selected"] as? Int64) == 1 { item.state = .on }
             menu.addItem(item)
         }
-        NSMenu.popUpContextMenu(menu, with: NSApp.currentEvent!, for: button)
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.minY), in: button)
         resetHideTimer()
     }
 
@@ -491,6 +537,7 @@ final class HUDOverlayView: NSView {
         let formatted = formatSpeed(speed)
         speedButton?.title = formatted
         speedButton?.toolTip = "Playback speed: \(formatted)"
+        speedButton?.setAccessibilityValue(formatted)
     }
 
     private func formatSpeed(_ value: Double) -> String {
@@ -505,6 +552,9 @@ final class HUDOverlayView: NSView {
     }
 
     func updateMuteIcon(muted: Bool) {
+        let label = muted ? "Unmute" : "Mute"
+        (muteGlass.contentView as? NSButton)?.setAccessibilityLabel(label)
+        (muteGlass.contentView as? NSButton)?.toolTip = label
         let name = muted ? "speaker.slash.fill" : "speaker.wave.2"
         let config = NSImage.SymbolConfiguration(pointSize: 15, weight: .medium)
         (muteGlass.contentView as? NSButton)?.image =
@@ -542,12 +592,12 @@ final class HUDOverlayView: NSView {
         nextGlass.isHidden = !(playerView?.delegate?.playerHasNext() ?? false)
     }
 
-    @objc private func subtitleTapped() {
-        showTrackMenu(type: "sub", property: "sid", for: senderView())
+    @objc private func subtitleTapped(_ sender: NSButton) {
+        showTrackMenu(type: "sub", property: "sid", for: sender)
     }
 
-    @objc private func audioTapped() {
-        showTrackMenu(type: "audio", property: "aid", for: senderView())
+    @objc private func audioTapped(_ sender: NSButton) {
+        showTrackMenu(type: "audio", property: "aid", for: sender)
     }
 
     func refreshTrackButtons() {
@@ -579,11 +629,6 @@ final class HUDOverlayView: NSView {
         needsLayout = true
     }
 
-    private func senderView() -> NSView {
-        guard let event = NSApp.currentEvent else { return self }
-        return hitTest(convert(event.locationInWindow, from: nil)) ?? self
-    }
-
     @objc private func trackMenuItemTapped(_ sender: NSMenuItem) {
         guard let property = sender.representedObject as? String else { return }
         playerView?.setTrack(property, id: sender.tag)
@@ -602,7 +647,7 @@ final class HUDOverlayView: NSView {
         let target = progressBar.doubleValue * duration
         pendingSeek = target
         let now = ProcessInfo.processInfo.systemUptime
-        if now - lastSeekAt >= seekMinInterval {
+        if !isScrubbing || now - lastSeekAt >= seekMinInterval {
             lastSeekAt = now
             pendingSeek = nil
             if target.isFinite { pv.seekAbsolute(target) }
@@ -638,13 +683,15 @@ final class HUDOverlayView: NSView {
         guard let pv = playerView, !isScrubbing else { return }
         let pos = pv.doubleProperty("time-pos") ?? 0
         let dur = pv.doubleProperty("duration") ?? 0
+        progressBar.isEnabled = dur.isFinite && dur > 0
+        (progressBar as? ScrubSlider)?.mediaDuration = dur
         let target = dur > 0 ? pos / dur : 0
         elapsedLabel.stringValue = formatTime(pos)
         remainingLabel.stringValue = "-\(formatTime(dur - pos))"
 
         // Coming back from hidden the knob froze where the HUD faded out; snap to
         // the real position instead of gliding from the stale value.
-        if wasHidden {
+        if wasHidden || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             progressBar.doubleValue = target
             wasHidden = false
             return
@@ -681,6 +728,9 @@ final class HUDOverlayView: NSView {
     }
 
     func updatePlayIcon(paused: Bool) {
+        let label = paused ? "Play" : "Pause"
+        (playGlass.contentView as? NSButton)?.setAccessibilityLabel(label)
+        (playGlass.contentView as? NSButton)?.toolTip = label
         let name = paused ? "play.fill" : "pause.fill"
         let config = NSImage.SymbolConfiguration(pointSize: 42, weight: .medium)
         (playGlass.contentView as? NSButton)?.image =
@@ -735,7 +785,7 @@ final class HUDOverlayView: NSView {
             setControlsVisible(true)
         }
         NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.2
+            ctx.duration = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.2
             self.animator().alphaValue = 1.0
         }
         setSubPos(8)
@@ -749,9 +799,9 @@ final class HUDOverlayView: NSView {
     }
 
     private func hideHUD() {
-        guard !isPaused else { return }
+        guard !isPaused, !shouldKeepControlsVisible else { return }
         NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.2
+            ctx.duration = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.2
             self.animator().alphaValue = 0.0
         }
         setSubPos(100)
@@ -762,14 +812,14 @@ final class HUDOverlayView: NSView {
     }
 
     private func showPausedTitleCard() {
-        guard isFileLoaded, isPaused, !isPausedTitleVisible else { return }
+        guard isFileLoaded, isPaused, !isPausedTitleVisible, !shouldKeepControlsVisible else { return }
         isPausedTitleVisible = true
         titleCardView.isHidden = false
         stopDisplayTimer()
         setSubPos(100)
         volumeStack?.alphaValue = 0
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.25
+            context.duration = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.25
             controlViews.forEach { $0.animator().alphaValue = 0 }
             titleCardView.animator().alphaValue = 1
         } completionHandler: {
@@ -788,7 +838,7 @@ final class HUDOverlayView: NSView {
             }
         }
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.2
+            context.duration = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.2
             controlViews.forEach { $0.animator().alphaValue = visible ? 1 : 0 }
             titleCardView.animator().alphaValue = visible ? 0 : 1
         } completionHandler: {
@@ -852,14 +902,14 @@ final class HUDOverlayView: NSView {
         volumeAboveTransport?.isActive = hudVisible
         needsLayout = true
         NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.15
+            ctx.duration = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.15
             (volumeStack ?? volumeLabel)?.animator().alphaValue = 0.5
         }
         volumeHideTimer?.invalidate()
         volumeHideTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: false) {
             [weak self] _ in
             NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 0.3
+                ctx.duration = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.3
                 (self?.volumeStack ?? self?.volumeLabel)?.animator().alphaValue = 0
             }
         }
@@ -881,6 +931,17 @@ final class HUDOverlayView: NSView {
                 self.hideHUD()
             }
         }
+    }
+
+    private var shouldKeepControlsVisible: Bool {
+        if NSWorkspace.shared.isVoiceOverEnabled { return true }
+        guard let focusedView = window?.firstResponder as? NSView else { return false }
+        return focusedView.isDescendant(of: self)
+    }
+
+    func revealControls() {
+        showHUD()
+        resetHideTimer()
     }
 
     private func startDisplayTimer() {
@@ -919,6 +980,10 @@ final class HUDOverlayView: NSView {
 
     func setFileLoaded(_ loaded: Bool) {
         isFileLoaded = loaded
+        isHidden = !loaded
+        setAccessibilityHidden(!loaded)
+        progressBar.isEnabled = false
+        if loaded, NSWorkspace.shared.isVoiceOverEnabled { revealControls() }
         if !loaded {
             hideTimer?.invalidate()
             isPausedTitleVisible = false
