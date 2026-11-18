@@ -120,9 +120,16 @@ final class AccessibilityTests: XCTestCase {
         let slider = ScrubSlider(value: 0.5, minValue: 0, maxValue: 1, target: nil, action: nil)
         XCTAssertEqual(slider.accessibilityValueDescription(), "Unavailable")
         slider.mediaDuration = 180
+        // The spoken value is localized; check its shape, then the English wording.
         XCTAssertEqual(
             slider.accessibilityValueDescription(),
-            "0 hours, 1 minutes, 30 seconds of 0 hours, 3 minutes, 0 seconds")
+            "\(ScrubSlider.spokenTime(90)) of \(ScrubSlider.spokenTime(180))")
+        var english = Calendar(identifier: .gregorian)
+        english.locale = Locale(identifier: "en_US")
+        XCTAssertEqual(ScrubSlider.spokenTime(90, calendar: english), "1 minute, 30 seconds")
+        XCTAssertEqual(ScrubSlider.spokenTime(180, calendar: english), "3 minutes")
+        XCTAssertEqual(ScrubSlider.spokenTime(3_661, calendar: english), "1 hour, 1 minute, 1 second")
+        XCTAssertEqual(ScrubSlider.spokenTime(0, calendar: english), "0 seconds")
         slider.mediaDuration = .nan
         XCTAssertEqual(slider.accessibilityValueDescription(), "Unavailable")
     }

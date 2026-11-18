@@ -18,11 +18,23 @@ final class ScrubSlider: NSSlider {
 
     override func accessibilityValueDescription() -> String? {
         guard mediaDuration.isFinite, mediaDuration > 0 else { return "Unavailable" }
-        func time(_ seconds: Double) -> String {
-            let total = Int(max(0, seconds))
-            return "\(total / 3600) hours, \((total % 3600) / 60) minutes, \(total % 60) seconds"
+        return "\(Self.spokenTime(doubleValue * mediaDuration)) of \(Self.spokenTime(mediaDuration))"
+    }
+
+    /// Localized, pluralized time without zero units, e.g. "1 minute, 30 seconds".
+    static func spokenTime(_ seconds: Double, calendar: Calendar = .autoupdatingCurrent) -> String {
+        let total = seconds.isFinite ? max(0, seconds.rounded(.down)) : 0
+        let formatter = DateComponentsFormatter()
+        formatter.calendar = calendar
+        formatter.unitsStyle = .full
+        if total < 1 {
+            formatter.allowedUnits = [.second]
+            formatter.zeroFormattingBehavior = .pad
+        } else {
+            formatter.allowedUnits = [.hour, .minute, .second]
+            formatter.zeroFormattingBehavior = [.dropLeading, .dropMiddle, .dropTrailing]
         }
-        return "\(time(doubleValue * mediaDuration)) of \(time(mediaDuration))"
+        return formatter.string(from: total) ?? ""
     }
 
     override func mouseDown(with event: NSEvent) {
