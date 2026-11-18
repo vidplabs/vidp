@@ -22,6 +22,7 @@ let package = Package(
             providers: [.brew(["mpv", "pkg-config"])]
         ),
         .systemLibrary(name: "CPIP", path: "Sources/CPIP"),
+        .testTarget(name: "VidpTests", dependencies: ["Vidp"], path: "Tests"),
         .executableTarget(
             name: "Vidp",
             dependencies: [

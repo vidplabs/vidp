@@ -8,6 +8,7 @@ final class PlayerView: NSView {
     private(set) var playerLayer: PlayerLayer?
     weak var delegate: PlayerDelegate?
     var onPiPToggle: (() -> Void)?
+    var onRevealControls: (() -> Void)?
     private(set) var fileLoaded = false
     private(set) var currentPath: String?
     private var currentMedia: MediaInfo?
@@ -165,7 +166,12 @@ final class PlayerView: NSView {
     }
 
     override func keyDown(with event: NSEvent) {
-        if event.modifierFlags.contains(.command) {
+        if !event.modifierFlags.intersection([.command, .control, .option]).isEmpty {
+            super.keyDown(with: event)
+            return
+        }
+        if event.keyCode == 48, fileLoaded {
+            onRevealControls?()
             super.keyDown(with: event)
             return
         }
