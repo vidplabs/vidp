@@ -697,7 +697,8 @@ final class HUDOverlayView: NSView {
         guard let pv = playerView, !isScrubbing else { return }
         let pos = pv.doubleProperty("time-pos") ?? 0
         let dur = pv.doubleProperty("duration") ?? 0
-        progressBar.isEnabled = dur.isFinite && dur > 0
+        let canSeek = dur.isFinite && dur > 0
+        if progressBar.isEnabled != canSeek { progressBar.isEnabled = canSeek }
         (progressBar as? ScrubSlider)?.mediaDuration = dur
         let target = dur > 0 ? pos / dur : 0
         elapsedLabel.stringValue = formatTime(pos)
