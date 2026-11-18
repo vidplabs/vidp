@@ -937,6 +937,12 @@ final class HUDOverlayView: NSView {
         let delay = isPaused ? pausedTitleDelay : hideDelay
         hideTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
             guard let self, self.isFileLoaded else { return }
+            // Focused or VoiceOver-driven controls stay up; check again later so
+            // the HUD still hides once focus returns to the video.
+            if self.shouldKeepControlsVisible {
+                self.startHideTimer()
+                return
+            }
             if self.isPaused {
                 self.showPausedTitleCard()
             } else {
