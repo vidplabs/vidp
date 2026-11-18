@@ -274,6 +274,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Play
         let playbackMenuItem = NSMenuItem()
         let playbackMenu = PlaybackMenu(title: "Playback")
         playbackMenu.settingsOpen = { [weak self] in self?.isSettingsOpen ?? false }
+        // Full Keyboard Access: Space activates the focused HUD button.
+        playbackMenu.focusedButtonTakesSpace = { [weak self] in
+            self?.window?.firstResponder is NSButton
+        }
         // Real key equivalents mirroring PlayerView.keyDown; they stay disabled
         // while a sheet/panel is open so they can't steal keystrokes (see
         // validateMenuItem).
@@ -1309,13 +1313,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Play
 }
 
 /// Disabled menu items can still consume their equivalents. Yield before AppKit
-/// matches them so Settings receives Space, arrows, and single-letter input.
+/// matches them so Settings receives Space, arrows, and single-letter input,
+/// and so Space presses a keyboard-focused button instead of toggling playback.
 final class PlaybackMenu: NSMenu {
     var settingsOpen: () -> Bool = { false }
+    var focusedButtonTakesSpace: () -> Bool = { false }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        if settingsOpen(), event.modifierFlags.intersection([.command, .control, .option]).isEmpty {
-            return false
+        if event.modifierFlags.intersection([.command, .control, .option]).isEmpty {
+            if settingsOpen() { return false }
+            if event.charactersIgnoringModifiers == " ", focusedButtonTakesSpace() { return false }
         }
         return super.performKeyEquivalent(with: event)
     }

@@ -39,6 +39,43 @@ final class AccessibilityTests: XCTestCase {
     }
 
     @MainActor
+    func testFocusedButtonReceivesSpaceInsteadOfPlayPause() {
+        _ = NSApplication.shared
+        let validator = PlaybackShortcutValidator()
+        var buttonFocused = true
+        let menu = PlaybackMenu(title: "Playback")
+        menu.focusedButtonTakesSpace = { buttonFocused }
+        let mainMenu = NSMenu(title: "Main")
+        let playbackItem = NSMenuItem(title: "Playback", action: nil, keyEquivalent: "")
+        playbackItem.submenu = menu
+        mainMenu.addItem(playbackItem)
+        let playPause = NSMenuItem(title: "Play/Pause", action: #selector(PlaybackShortcutValidator.activate(_:)), keyEquivalent: " ")
+        playPause.keyEquivalentModifierMask = []
+        playPause.target = validator
+        menu.addItem(playPause)
+        let mute = NSMenuItem(title: "Mute", action: #selector(PlaybackShortcutValidator.activate(_:)), keyEquivalent: "m")
+        mute.keyEquivalentModifierMask = []
+        mute.target = validator
+        menu.addItem(mute)
+        func key(_ characters: String, _ keyCode: UInt16) -> NSEvent {
+            NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                windowNumber: 0, context: nil, characters: characters,
+                charactersIgnoringModifiers: characters, isARepeat: false, keyCode: keyCode)!
+        }
+
+        // A focused button owns Space; other shortcuts keep working.
+        XCTAssertFalse(mainMenu.performKeyEquivalent(with: key(" ", 49)))
+        XCTAssertEqual(validator.activations, 0)
+        XCTAssertTrue(mainMenu.performKeyEquivalent(with: key("m", 46)))
+        XCTAssertEqual(validator.activations, 1)
+
+        buttonFocused = false
+        XCTAssertTrue(mainMenu.performKeyEquivalent(with: key(" ", 49)))
+        XCTAssertEqual(validator.activations, 2)
+    }
+
+    @MainActor
     private func descendants(of view: NSView) -> [NSView] {
         view.subviews.flatMap { [$0] + descendants(of: $0) }
     }
