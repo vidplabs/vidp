@@ -524,7 +524,9 @@ final class HUDOverlayView: NSView {
             if (track["selected"] as? Int64) == 1 { item.state = .on }
             menu.addItem(item)
         }
-        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.minY), in: button)
+        // Open just below the button; NSButton is flipped, so its bottom is maxY.
+        let below = button.isFlipped ? button.bounds.maxY + 4 : button.bounds.minY - 4
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: below), in: button)
         resetHideTimer()
     }
 
