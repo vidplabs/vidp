@@ -474,7 +474,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, Play
     private func closeSettingsSidebar() {
         guard isSettingsOpen else { return }
         isSettingsOpen = false
-        settingsSplitItem.animator().isCollapsed = true
+        NSAnimationContext.runAnimationGroup { context in
+            if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { context.duration = 0 }
+            settingsSplitItem.animator().isCollapsed = true
+        }
         hudOverlay.revealControls()
         window.makeFirstResponder(playerView)
         removeSettingsMonitor()
